@@ -37,6 +37,9 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Build;
 import android.telephony.TelephonyManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+
 
 import java.util.Locale;
 
@@ -175,11 +178,15 @@ public class NetworkManager extends CordovaPlugin {
                     }
 
                     // Lollipop always returns false for the EXTRA_NO_CONNECTIVITY flag => fix for Android M and above.
-                    if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && TYPE_NONE.equals(connectionType)) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && TYPE_NONE.equals(connectionType)) {
                         boolean noConnectivity = intent.getBooleanExtra(ConnectivityManager.EXTRA_NO_CONNECTIVITY, false);
                         LOG.d(LOG_TAG, "Intent no connectivity: " + noConnectivity);
-                        if(noConnectivity) {
+                        if (noConnectivity) {
                             LOG.d(LOG_TAG, "Really no connectivity");
+                            sendUpdate(TYPE_NONE);
+                        } else if (!hasNonVpnInternetNetwork()) {
+                            LOG.d(LOG_TAG, "Intent states there is connectivity but no non-VPN internet-capable network exists - remaining offline");
+                            sendUpdate(TYPE_NONE);
                         } else {
                             LOG.d(LOG_TAG, "!!! Switching to unknown, Intent states there is a connectivity.");
                             sendUpdate(TYPE_UNKNOWN);
@@ -306,4 +313,31 @@ public class NetworkManager extends CordovaPlugin {
         }
         return TYPE_UNKNOWN;
     }
+
+    /**
+     * Determines whether at least one non-VPN network currently offers internet connectivity.
+     *
+     * A VPN cannot carry traffic without an underlying physical network (Wi-Fi, cellular, ethernet, etc.),
+     * so VPN networks are ignored. This prevents a connected VPN tunnel with no underlying network
+     * from being reported as an active connection.
+     *
+     * Networks without NET_CAPABILITY_INTERNET (e.g. the cellular IMS network used for VoLTE) are also ignored.
+     *
+     * @return true if a non-VPN network with internet capability is present, false otherwise.
+     */
+    private boolean hasNonVpnInternetNetwork() {
+        // getAllNetworks() is deprecated from API 31 but remains functional and is the simplest
+        // synchronous way to inspect all networks from a BroadcastReceiver.
+        for (Network network : sockMan.getAllNetworks()) {
+            NetworkCapabilities capabilities = sockMan.getNetworkCapabilities(network);
+            if (capabilities == null || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                continue;
+            }
+            if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 }
